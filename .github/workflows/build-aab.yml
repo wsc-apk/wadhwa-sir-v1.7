@@ -8,16 +8,18 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm install --legacy-peer-deps
-      - name: Upgrade Capacitor and Add AdMob Plugin
+      - name: Upgrade Capacitor and Add Plugins
         run: |
-          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/status-bar@latest @capawesome/capacitor-android-edge-to-edge-support@latest @capacitor-community/admob@latest --legacy-peer-deps
+          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/status-bar@latest @capawesome/capacitor-android-edge-to-edge-support@latest @capacitor-community/admob@latest @capacitor/push-notifications@latest @capacitor-community/fcm@latest --legacy-peer-deps
       - run: npm run build
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - uses: android-actions/setup-android@v3
       - run: npx cap add android || true
       - run: npx cap sync android
-      - name: Strict Regex Injection for AdMob AD_ID
+      - name: Copy Firebase Config to Android Folder
+        run: cp google-services.json android/app/ || true
+      - name: Strict Regex Injection for AdMob and Firebase
         run: |
           node - <<'NODE'
           const fs=require('fs');
@@ -26,18 +28,15 @@ jobs:
           cfg.android={...(cfg.android||{}), adjustMarginsForEdgeToEdge:'auto'};
           cfg.plugins={...(cfg.plugins||{})};
           cfg.plugins.EdgeToEdge={ backgroundColor:'#0b1220', statusBarColor:'#0b1220', navigationBarColor:'#0b1220' };
+          cfg.plugins.PushNotifications={ presentationOptions: ["badge", "sound", "alert"] };
           fs.writeFileSync('capacitor.config.json', JSON.stringify(cfg,null,2));
 
           const path = 'android/app/src/main/AndroidManifest.xml';
           if(fs.existsSync(path)) {
               let content = fs.readFileSync(path, 'utf8');
-              
-              // Inject AD_ID permission right after the opening <manifest> tag
               if(!content.includes('com.google.android.gms.permission.AD_ID')) {
                   content = content.replace(/(<manifest[^>]*>)/i, '$1\n    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>');
               }
-              
-              // Inject AdMob App ID right before the closing </application> tag
               if(!content.includes('com.google.android.gms.ads.APPLICATION_ID')) {
                   content = content.replace(/(<\/application>)/i, '    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-8576378038310405~4113931989"/>\n$1');
               }
@@ -46,12 +45,14 @@ jobs:
           NODE
           sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 36/" android/variables.gradle || true
           sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 36/" android/variables.gradle || true
+          sed -i -e '/dependencies {/a\        classpath "com.google.gms:google-services:4.4.2"' android/build.gradle
+          sed -i -e '/apply plugin: "com.android.application"/a\apply plugin: "com.google.gms.google-services"' android/app/build.gradle
       - name: Install SDK Platforms
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
-      - name: Force version 1.5 (Code 15) for Play Console
+      - name: Force version 1.6 (Code 16) for Play Console
         run: |
-          sed -i "s/versionCode [0-9]*/versionCode 15/" android/app/build.gradle
-          sed -i "s/versionName \"[^\"]*\"/versionName \"1.5\"/" android/app/build.gradle
+          sed -i "s/versionCode [0-9]*/versionCode 16/" android/app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"1.6\"/" android/app/build.gradle
       - run: |
           sudo apt-get update -qq && sudo apt-get install -y imagemagick > /dev/null
           rm -f android/app/src/main/res/mipmap-anydpi-v26/*.xml
