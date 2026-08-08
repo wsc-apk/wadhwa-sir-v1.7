@@ -3,6 +3,8 @@ on: { workflow_dispatch: {} }
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v5
@@ -14,7 +16,7 @@ jobs:
       - run: npm run build
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 21 }
-      - uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@v3
       - run: npx cap add android || true
       - run: npx cap sync android
       - name: Copy Firebase Config to Android Folder
@@ -64,4 +66,3 @@ jobs:
           jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload-keystore.jks -storepass Uhk@738_ghRU87@98dfs -keypass Uhk@738_ghRU87@98dfs android/app/build/outputs/bundle/release/app-release.aab upload
       - uses: actions/upload-artifact@v4
         with: { name: app-aab-signed, path: android/app/build/outputs/bundle/release/app-release.aab }
-        
