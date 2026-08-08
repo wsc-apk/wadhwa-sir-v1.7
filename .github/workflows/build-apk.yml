@@ -56,5 +56,5 @@ jobs:
         run: |
           $ANDROID_HOME/build-tools/36.0.0/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
           $ANDROID_HOME/build-tools/36.0.0/apksigner sign --ks upload-keystore.jks --ks-pass pass:Uhk@738_ghRU87@98dfs --key-pass pass:Uhk@738_ghRU87@98dfs --ks-key-alias upload --out app-release-signed.apk app-release-aligned.apk
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: app-apk-signed, path: app-release-signed.apk }
