@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "807322049662",
+    "project_id": "wadhwa-sir-classroom",
+    "storage_bucket": "wadhwa-sir-classroom.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:807322049662:android:60784456b313ee71a4cc2f",
+        "android_client_info": {
+          "package_name": "com.wadhwasir.classroom"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYGp9OPw93K0LrrQG7jj6C9ZGika2JO0U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
