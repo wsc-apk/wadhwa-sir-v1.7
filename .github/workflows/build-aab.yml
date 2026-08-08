@@ -55,5 +55,5 @@ jobs:
       - name: Sign AAB using Jarsigner
         run: |
           jarsigner -verbose -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload-keystore.jks -storepass Uhk@738_ghRU87@98dfs -keypass Uhk@738_ghRU87@98dfs android/app/build/outputs/bundle/release/app-release.aab upload
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: app-aab-signed, path: android/app/build/outputs/bundle/release/app-release.aab }
