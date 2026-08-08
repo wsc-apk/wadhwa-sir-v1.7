@@ -3,10 +3,8 @@ on: { workflow_dispatch: {} }
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with: { node-version: 22, cache: npm }
       - run: npm install --legacy-peer-deps
@@ -16,12 +14,12 @@ jobs:
       - run: npm run build
       - uses: actions/setup-java@v5
         with: { distribution: temurin, java-version: 21 }
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - run: npx cap add android || true
       - run: npx cap sync android
-      - name: Copy Firebase Config to Android Folder
+      - name: Copy Firebase Config
         run: cp google-services.json android/app/ || true
-      - name: Strict Regex Injection for AdMob and Firebase
+      - name: Update Capacitor Config
         run: |
           node - <<'NODE'
           const fs=require('fs');
@@ -32,26 +30,19 @@ jobs:
           cfg.plugins.EdgeToEdge={ backgroundColor:'#0b1220', statusBarColor:'#0b1220', navigationBarColor:'#0b1220' };
           cfg.plugins.PushNotifications={ presentationOptions: ["badge", "sound", "alert"] };
           fs.writeFileSync('capacitor.config.json', JSON.stringify(cfg,null,2));
-
-          const path = 'android/app/src/main/AndroidManifest.xml';
-          if(fs.existsSync(path)) {
-              let content = fs.readFileSync(path, 'utf8');
-              if(!content.includes('com.google.android.gms.permission.AD_ID')) {
-                  content = content.replace(/(<manifest[^>]*>)/i, '$1\n    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>');
-              }
-              if(!content.includes('com.google.android.gms.ads.APPLICATION_ID')) {
-                  content = content.replace(/(<\/application>)/i, '    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-8576378038310405~4113931989"/>\n$1');
-              }
-              fs.writeFileSync(path, content);
-          }
           NODE
+      - name: Force Inject AdMob Permissions and SDK 36
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          grep -q "com.google.android.gms.permission.AD_ID" $MANIFEST || sed -i '/<manifest/a\    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>' $MANIFEST
+          grep -q "com.google.android.gms.ads.APPLICATION_ID" $MANIFEST || sed -i '/<\/application>/i\        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-8576378038310405~4113931989"/>' $MANIFEST
           sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 36/" android/variables.gradle || true
           sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 36/" android/variables.gradle || true
           sed -i -e '/dependencies {/a\        classpath "com.google.gms:google-services:4.4.2"' android/build.gradle
           sed -i -e '/apply plugin: "com.android.application"/a\apply plugin: "com.google.gms.google-services"' android/app/build.gradle
       - name: Install SDK Platforms
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
-      - name: Force version 1.6 (Code 16) for Play Console
+      - name: Force version 1.6
         run: |
           sed -i "s/versionCode [0-9]*/versionCode 16/" android/app/build.gradle
           sed -i "s/versionName \"[^\"]*\"/versionName \"1.6\"/" android/app/build.gradle
@@ -65,5 +56,5 @@ jobs:
         run: |
           $ANDROID_HOME/build-tools/36.0.0/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
           $ANDROID_HOME/build-tools/36.0.0/apksigner sign --ks upload-keystore.jks --ks-pass pass:Uhk@738_ghRU87@98dfs --key-pass pass:Uhk@738_ghRU87@98dfs --ks-key-alias upload --out app-release-signed.apk app-release-aligned.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with: { name: app-apk-signed, path: app-release-signed.apk }
