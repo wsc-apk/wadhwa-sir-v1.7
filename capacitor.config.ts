@@ -1,4 +1,4 @@
-import { CapacitorConfig } from '@capacitor/core';
+import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.wadhwasir.classroom',
@@ -7,27 +7,20 @@ const config: CapacitorConfig = {
   backgroundColor: '#0a0f1c',
   server: {
     url: 'https://wsc-apk.netlify.app',
-    cleartext: true,
+    cleartext: false,
     androidScheme: 'https',
-    allowNavigation: [
-      'wsc-apk.netlify.app',
-      '*.netlify.app'
-    ]
+    allowNavigation: ['wsc-apk.netlify.app']
   },
   plugins: {
+    SystemBars: { insetsHandling: 'disable' },
     SplashScreen: {
       launchShowDuration: 0,
-      launchAutoHide: false,
+      launchAutoHide: true,
       backgroundColor: '#0a0f1c',
       androidSplashResourceName: 'splash',
       showSpinner: false
     },
-    StatusBar: {
-      style: 'DARK',
-      backgroundColor: '#0a0f1c',
-      overlaysWebView: false
-    }
+    PushNotifications: { presentationOptions: ['badge', 'sound', 'alert'] }
   }
 };
-
 export default config;
