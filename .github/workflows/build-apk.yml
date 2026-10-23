@@ -1,60 +1,74 @@
-name: Build Test APK
-on: { workflow_dispatch: {} }
+name: Build Test APK - WSC 1.7 (17)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with: { node-version: 22, cache: npm }
-      - run: npm install --legacy-peer-deps
-      - name: Upgrade Capacitor and Add Plugins
+      - name: Protect the v1.6 repository
         run: |
-          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest @capacitor/status-bar@latest @capawesome/capacitor-android-edge-to-edge-support@latest @capacitor-community/admob@latest @capacitor/push-notifications@latest @capacitor-community/fcm@latest --legacy-peer-deps
-      - run: npm run build
-      - uses: actions/setup-java@v5
-        with: { distribution: temurin, java-version: 21 }
-      - uses: android-actions/setup-android@v4
-      - run: npx cap add android || true
-      - run: npx cap sync android
-      - name: Copy Firebase Config
-        run: cp google-services.json android/app/ || true
-      - name: Update Capacitor Config
-        run: |
-          node - <<'NODE'
-          const fs=require('fs');
-          let cfg={};
-          if(fs.existsSync('capacitor.config.json')) cfg=JSON.parse(fs.readFileSync('capacitor.config.json','utf8'));
-          cfg.android={...(cfg.android||{}), adjustMarginsForEdgeToEdge:'auto'};
-          cfg.plugins={...(cfg.plugins||{})};
-          cfg.plugins.EdgeToEdge={ backgroundColor:'#0b1220', statusBarColor:'#0b1220', navigationBarColor:'#0b1220' };
-          cfg.plugins.PushNotifications={ presentationOptions: ["badge", "sound", "alert"] };
-          fs.writeFileSync('capacitor.config.json', JSON.stringify(cfg,null,2));
-          NODE
-      - name: Force Inject AdMob Permissions and SDK 36
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          grep -q "com.google.android.gms.permission.AD_ID" $MANIFEST || sed -i '/<manifest/a\    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>' $MANIFEST
-          grep -q "com.google.android.gms.ads.APPLICATION_ID" $MANIFEST || sed -i '/<\/application>/i\        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-8576378038310405~4113931989"/>' $MANIFEST
-          sed -i "s/compileSdkVersion = [0-9]*/compileSdkVersion = 36/" android/variables.gradle || true
-          sed -i "s/targetSdkVersion = [0-9]*/targetSdkVersion = 36/" android/variables.gradle || true
-          sed -i -e '/dependencies {/a\        classpath "com.google.gms:google-services:4.4.2"' android/build.gradle
-          sed -i -e '/apply plugin: "com.android.application"/a\apply plugin: "com.google.gms.google-services"' android/app/build.gradle
-      - name: Install SDK Platforms
+          test "${GITHUB_REPOSITORY##*/}" = "wadhwa-sir-v1.7" || { echo "Use the v1.7 repository only"; exit 1; }
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install the exact locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build the web shell
+        run: npm run build
+      - uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4.0.4
+      - name: Install SDK 36
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
-      - name: Force version 1.6
+      - name: Generate a clean Android project from the pinned template
         run: |
-          sed -i "s/versionCode [0-9]*/versionCode 16/" android/app/build.gradle
-          sed -i "s/versionName \"[^\"]*\"/versionName \"1.6\"/" android/app/build.gradle
-      - run: |
-          sudo apt-get update -qq && sudo apt-get install -y imagemagick > /dev/null
-          rm -f android/app/src/main/res/mipmap-anydpi-v26/*.xml
-          for s in 48 72 96 144 192; do d=""; case $s in 48)d=mdpi;;72)d=hdpi;;96)d=xhdpi;;144)d=xxhdpi;;192)d=xxxhdpi;;esac; convert assets/icon.png -resize ${s}x${s} android/app/src/main/res/mipmap-${d}/ic_launcher.png; convert assets/icon.png -resize ${s}x${s} android/app/src/main/res/mipmap-${d}/ic_launcher_round.png; convert assets/icon.png -resize ${s}x${s} android/app/src/main/res/mipmap-${d}/ic_launcher_foreground.png; done
-      - name: Build Unsigned Release APK
-        run: cd android && ./gradlew assembleRelease
-      - name: Zipalign and Sign APK
+          set -euo pipefail
+          test ! -d android || { echo "Unexpected tracked android folder. Stop and review before replacing it."; exit 1; }
+          test ! -f capacitor.config.json || { echo "Remove obsolete duplicate capacitor.config.json; use the supplied capacitor.config.ts only."; exit 1; }
+          npx cap add android
+          npx cap sync android
+      - name: Configure AD_ID, Firebase, fullscreen, version and optimisation
+        run: python3 tools/prepare_android.py
+      - name: Preserve the existing launcher icon
         run: |
-          $ANDROID_HOME/build-tools/36.0.0/zipalign -v -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk app-release-aligned.apk
-          $ANDROID_HOME/build-tools/36.0.0/apksigner sign --ks upload-keystore.jks --ks-pass pass:Uhk@738_ghRU87@98dfs --key-pass pass:Uhk@738_ghRU87@98dfs --ks-key-alias upload --out app-release-signed.apk app-release-aligned.apk
-      - uses: actions/upload-artifact@v7
-        with: { name: app-apk-signed, path: app-release-signed.apk }
+          set -euo pipefail
+          test -f assets/icon.png
+          sudo apt-get update -qq
+          sudo apt-get install -y imagemagick >/dev/null
+          for pair in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            density="${pair%:*}"
+            size="${pair#*:}"
+            folder="android/app/src/main/res/mipmap-$density"
+            mkdir -p "$folder"
+            for name in ic_launcher ic_launcher_round ic_launcher_foreground; do
+              convert assets/icon.png -resize "${size}x${size}" "$folder/$name.png"
+            done
+          done
+          rm -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+      - name: Build the optimised release
+        run: |
+          chmod +x android/gradlew
+          cd android
+          ./gradlew assembleRelease --stacktrace
+      - name: Sign and verify the FINAL artifact
+        env:
+          WSC_KEYSTORE_PASSWORD: ${{ secrets.WSC_KEYSTORE_PASSWORD }}
+          WSC_KEY_PASSWORD: ${{ secrets.WSC_KEY_PASSWORD }}
+          WSC_KEY_ALIAS: ${{ secrets.WSC_KEY_ALIAS }}
+        run: bash tools/sign_verify.sh apk
+      - name: Upload only verified release files
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: WSC-1.7-17-apk-SIGNED
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
