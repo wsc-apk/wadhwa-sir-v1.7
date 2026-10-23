@@ -3,24 +3,12 @@ import { RouteReuseStrategy, provideRouter, withPreloading, PreloadAllModules } 
 import { IonicRouteStrategy, provideIonicAngular } from '@ionic/angular/standalone';
 import { routes } from './app/app.routes';
 import { AppComponent } from './app/app.component';
-import { App as CapacitorApp } from '@capacitor/app';
-import { StatusBar } from '@capacitor/status-bar';
-import { SplashScreen } from '@capacitor/splash-screen';
 
+// The native activity controls system bars. Hosted pages own their back handlers.
 bootstrapApplication(AppComponent, {
   providers: [
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
     provideIonicAngular(),
-    provideRouter(routes, withPreloading(PreloadAllModules)),
-  ],
-}).then(() => {
-  StatusBar.setOverlaysWebView({ overlay: false });
-  StatusBar.setBackgroundColor({ color: '#0a0f1c' });
-  
-  // keep splash for 2.5 sec while Netlify loads, then hide
-  setTimeout(() => SplashScreen.hide(), 2500);
-
-  CapacitorApp.addListener('backButton', ({ canGoBack }) => {
-    if (!canGoBack) CapacitorApp.exitApp(); else window.history.back();
-  });
-});
+    provideRouter(routes, withPreloading(PreloadAllModules))
+  ]
+}).catch(error => console.error('WSC bootstrap failed', error));
