@@ -1,0 +1,143 @@
+name: Verify v1.7 Setup (No App Build)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      EXPECTED_PACKAGE: com.wadhwasir.classroom
+      EXPECTED_UPLOAD_SHA256: AEDD5EB699AA7F9B1C2F2D6DB88651D153C69F3AEA73D815AB4D5B7462DEEC23
+      EXPECTED_PROJECT: wadhwa-sir-classroom
+      WSC_KEYSTORE_PASSWORD: ${{ secrets.WSC_KEYSTORE_PASSWORD }}
+      WSC_KEY_PASSWORD: ${{ secrets.WSC_KEY_PASSWORD }}
+      WSC_KEY_ALIAS: ${{ secrets.WSC_KEY_ALIAS }}
+
+    steps:
+      - name: Confirm this is the v1.7 repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REPOSITORY##*/}" != "wadhwa-sir-v1.7" ]]; then
+            echo "::error::Run this workflow only in wadhwa-sir-v1.7."
+            exit 1
+          fi
+
+      - name: Read repository files
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Java for signing verification
+        uses: actions/setup-java@v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Validate inputs and Firebase Android configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in WSC_KEYSTORE_PASSWORD WSC_KEY_PASSWORD WSC_KEY_ALIAS; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Missing repository Actions secret: $name"
+              exit 1
+            fi
+          done
+          for file in upload-keystore.jks google-services.json package.json package-lock.json capacitor.config.ts; do
+            if [[ ! -f "$file" ]]; then
+              echo "::error::Required repository file is missing: $file"
+              exit 1
+            fi
+          done
+          python3 - <<'PY'
+          import json, os, pathlib
+          config = json.loads(pathlib.Path('google-services.json').read_text())
+          project = config.get('project_info', {}).get('project_id')
+          if project != os.environ['EXPECTED_PROJECT']:
+              raise SystemExit('Firebase project does not match wadhwa-sir-classroom.')
+          clients = [c for c in config.get('client', []) if
+                     c.get('client_info', {}).get('android_client_info', {}).get('package_name')
+                     == os.environ['EXPECTED_PACKAGE']]
+          if not clients:
+              raise SystemExit('google-services.json has no Android client for com.wadhwasir.classroom.')
+          print('PASS: Firebase Android client and project match.')
+          package = json.loads(pathlib.Path('package.json').read_text())
+          lock = json.loads(pathlib.Path('package-lock.json').read_text())
+          root = lock.get('packages', {}).get('', {})
+          mismatch = (package.get('name') != root.get('name') or
+                      package.get('dependencies', {}) != root.get('dependencies', {}) or
+                      package.get('devDependencies', {}) != root.get('devDependencies', {}))
+          print('Dependency files: ' + ('MISMATCH CONFIRMED; replacement lock file required.' if mismatch else 'root declarations match.'))
+          print('This workflow does not install or modify dependencies.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## WSC v1.7 preflight\n\n')
+              f.write('- Android package: `com.wadhwasir.classroom`\n')
+              f.write('- Firebase Android configuration: **matches**\n')
+              f.write('- Planned release: **1.7 / 17** (not built by this workflow)\n')
+              f.write('- Package/lock declarations: **' + ('mismatch confirmed' if mismatch else 'match') + '**\n')
+          PY
+
+      - name: Verify the keystore matches the Play upload certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -exportcert -rfc \
+            -keystore upload-keystore.jks \
+            -storepass:env WSC_KEYSTORE_PASSWORD \
+            -alias "$WSC_KEY_ALIAS" \
+            -file "$RUNNER_TEMP/wsc-upload-cert.pem"
+          ACTUAL="$(openssl x509 -in "$RUNNER_TEMP/wsc-upload-cert.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':\r\n ' | tr '[:lower:]' '[:upper:]')"
+          if [[ "$ACTUAL" != "$EXPECTED_UPLOAD_SHA256" ]]; then
+            echo "::error::Keystore certificate does not match the supplied Play upload certificate. Do not change the expected value merely to pass this test."
+            echo "Actual certificate SHA-256: $ACTUAL"
+            exit 1
+          fi
+          echo "PASS: Keystore certificate matches the expected upload certificate."
+          echo '- Upload certificate: **matches supplied Play Console fingerprint**' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify both passwords can actually sign a disposable test file
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/wsc-signing-check"
+          printf 'WSC signing verification only. Not an APK or AAB.\n' > "$RUNNER_TEMP/wsc-signing-check/check.txt"
+          jar --create --file "$RUNNER_TEMP/wsc-signing-check.jar" -C "$RUNNER_TEMP/wsc-signing-check" .
+          jarsigner -J-Duser.language=en -J-Duser.country=US \
+            -keystore upload-keystore.jks \
+            -storepass:env WSC_KEYSTORE_PASSWORD \
+            -keypass:env WSC_KEY_PASSWORD \
+            "$RUNNER_TEMP/wsc-signing-check.jar" "$WSC_KEY_ALIAS"
+          jarsigner -J-Duser.language=en -J-Duser.country=US -verify \
+            "$RUNNER_TEMP/wsc-signing-check.jar" > "$RUNNER_TEMP/wsc-signature-report.txt" 2>&1
+          if ! grep -q 'jar verified\.' "$RUNNER_TEMP/wsc-signature-report.txt"; then
+            echo "::error::Disposable test signature verification failed."
+            cat "$RUNNER_TEMP/wsc-signature-report.txt"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import os, zipfile
+          path = os.path.join(os.environ['RUNNER_TEMP'], 'wsc-signing-check.jar')
+          with zipfile.ZipFile(path) as z:
+              names = [n.upper() for n in z.namelist()]
+              if not any(n.startswith('META-INF/') and n.endswith('.SF') for n in names):
+                  raise SystemExit('No signature file found.')
+              if not any(n.startswith('META-INF/') and n.endswith(('.RSA', '.DSA', '.EC')) for n in names):
+                  raise SystemExit('No signature block found.')
+          print('PASS: Actual signing and verification succeeded using Actions secrets.')
+          PY
+          echo '- Secret-based signing test: **passed**' >> "$GITHUB_STEP_SUMMARY"
+          echo '- No APK/AAB was created, uploaded, or published. No repository files were changed.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove disposable verification files
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/wsc-upload-cert.pem" "$RUNNER_TEMP/wsc-signing-check.jar" "$RUNNER_TEMP/wsc-signature-report.txt"
+          rm -rf "$RUNNER_TEMP/wsc-signing-check"
+          
